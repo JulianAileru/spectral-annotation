@@ -83,7 +83,8 @@ LIB_SUBDIR="$OUTPUT_PARENT/$LIB_NAME"
 if [[ -d "$LIB_SUBDIR" ]]; then
     for f in "$LIB_SUBDIR"/*; do
         [[ -e "$f" ]] || continue
+        [[ "$f" == *.log ]] && continue
         mv "$f" "${OUTPUT_LIB}.${f##*.}"
     done
-    rmdir "$LIB_SUBDIR"
+    rm -rf "$LIB_SUBDIR"
 fi
