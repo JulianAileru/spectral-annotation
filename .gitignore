@@ -1,2 +1,2 @@
-annotation/apptainer-files/nist-tools_latest.sif
-annotation/spectral_libraries/HMDB_ARCHIVE
+lib2nist-apptainer/nist-tools.sif
+spectral_libraries/HMDB/HMDB_ARCHIVE

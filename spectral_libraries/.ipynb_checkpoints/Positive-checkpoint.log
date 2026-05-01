@@ -1,0 +1,24 @@
+
+LIB2NIST conversion into NIST MS Library started 05/01/26 at 11:56:52
+Input:  "Z:\tmp\jaileru\47113483\c1516ood14.ll.unc.edu\lib2nist_E4DYgC\Positive.msp"
+Output: "Z:\users\j\a\jaileru\spectral-annotation\annotation\spectral_libraries\Positive"
+Output type: NIST MS User Library
+NIST MS Base Directory: ""
+Logging level = 9
+Input data type: ASCII MS Data
+-----   Conversion Settings   ----
+MW from chemical formula: Y
+Keep output IDs same as input IDs: Y
+MS Search 2008 MS/MS Compatibility: Y
+Keep zero abundances: N
+Add or Replace InChIKeys: Y
+Include synonyms: Y
+Ignore extra data in comments (RI,BP,MP): N
+----- Conversion Settings End ----
+Output Directory "Z:\users\j\a\jaileru\spectral-annotation\annotation\spectral_libraries\Positive\" already exists. Overwrite? Y
+
+Starting final indexing of 24902 spectra in the library "Z:\users\j\a\jaileru\spectral-annotation\annotation\spectral_libraries\Positive\"
+Converted 24902 spectra from "Z:\tmp\jaileru\47113483\c1516ood14.ll.unc.edu\lib2nist_E4DYgC\Positive.msp" into library "Z:\users\j\a\jaileru\spectral-annotation\annotation\spectral_libraries\Positive\"
+L0: Could not create alias file
+L0: Could not create signature file
+LIB2NIST conversion finished 05/01/26 at 11:57:07
