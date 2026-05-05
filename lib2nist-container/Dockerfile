@@ -3,8 +3,8 @@
 # Build context expects:
 #   ./binaries/MSPepSearch64.zip   (from NIST)
 #
-# Build:
-#   docker build -t nist-tools:latest .
+# Build (run from project root so src/ is in context):
+#   docker build -f lib2nist-container/Dockerfile -t nist-tools:latest .
 #
 # Convert to Apptainer on Longleaf:
 #   docker save nist-tools:latest -o nist-tools.tar
@@ -36,7 +36,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Stage NIST binaries
-COPY binaries/ /tmp/binaries/
+COPY lib2nist-container/binaries/ /tmp/binaries/
 
 RUN mkdir -p /opt/mspepsearch && \
     mkdir -p /opt/lib2nist && \
@@ -61,11 +61,11 @@ ENV PATH=/opt/lib2nist/:$PATH
 # Helper to copy the prefix to a writable location and exec a Wine command.
 # Usage:
 #   run_with_wine_prefix.sh <wine_command...>
-COPY convert.ini /opt/lib2nist/convert.ini
-COPY run_with_wine_prefix.sh /usr/local/bin/run_with_wine_prefix.sh
-COPY lib2nist_convert.sh /usr/local/bin/lib2nist_convert.sh
-RUN chmod +x /usr/local/bin/run_with_wine_prefix.sh \
-             /usr/local/bin/lib2nist_convert.sh
+COPY lib2nist-container/convert.ini          /opt/lib2nist/convert.ini
+COPY lib2nist-container/wrapper.ini          /opt/lib2nist/wrapper.ini
+COPY lib2nist-container/run_with_wine_prefix.sh /usr/local/bin/run_with_wine_prefix.sh
+COPY src/libconverter.py                     /usr/local/bin/libconverter.py
+RUN chmod +x /usr/local/bin/run_with_wine_prefix.sh /usr/local/bin/libconverter.py
 
 WORKDIR /work
 CMD ["/bin/bash"]

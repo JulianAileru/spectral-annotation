@@ -12,24 +12,26 @@ Designed for local Docker use and Apptainer deployment on Longleaf HPC.
 |---|---|
 | `/opt/lib2nist/` | lib2nist64.exe and supporting files |
 | `/opt/lib2nist/convert.ini` | Output options config (editable) |
+| `/opt/lib2nist/wrapper.ini` | Python wrapper config (exe paths) |
 | `/opt/mspepsearch/2024_03_15_MSPepSearch_x64/` | MSPepSearch64.exe |
 | `/opt/wine64/` | Pre-initialized 64-bit Wine prefix (read-only) |
-| `/usr/local/bin/lib2nist_convert.sh` | Conversion entrypoint |
+| `/usr/local/bin/libconverter.py` | Conversion entrypoint (Python) |
 | `/usr/local/bin/run_with_wine_prefix.sh` | Wine prefix isolation helper |
 
 ---
 
 ## Build
 
+Build from the **project root** so both `lib2nist-container/` and `src/` are in the build context:
+
 ```bash
-cd nph-processing-pipeline/containers
-docker build -t nist-tools:latest .
+docker build -f lib2nist-container/Dockerfile -t nist-tools:latest .
 ```
 
-The build context requires these files to exist under `binaries/` before building:
+The build context requires these files to exist under `lib2nist-container/binaries/` before building:
 
 ```
-binaries/
+lib2nist-container/binaries/
   lib2nist.zip      # lib2nist64 from NIST
   MSPepSearch.zip   # MSPepSearch64 from NIST
 ```
@@ -38,58 +40,72 @@ binaries/
 
 ## Converting a spectral library
 
-`lib2nist_convert.sh` converts an MSP or SDF file to NIST binary format (`.lib`, `.idx`, `.num`).
+`libconverter.py` converts an MSP or SDF file to NIST binary format. It can be used as a CLI tool inside the container or imported as a Python module.
 
 ```
-lib2nist_convert.sh <input> <output_library> [log_file]
+libconverter.py --input <file> --outlib <path> [--log <file>] [--config <ini>]
 
-  input           MSP or SDF file (absolute path inside the container)
-  output_library  Output library path without extension
-  log_file        Optional. Defaults to <output_library>.log
+  --input    MSP or SDF file (absolute path inside the container)
+  --outlib   Output library path (no extension)
+  --log      Optional log file path. Defaults to <outlib>.log
+  --config   Optional path to wrapper.ini. Defaults to /opt/lib2nist/wrapper.ini
 ```
 
-Mount the directory containing your input file to `/work`, then pass container-side paths:
+Mount your data directory to `/work`, then pass container-side paths:
 
 ```bash
 docker run --rm \
-  -v "/path/to/your/data:/work" \
+  --mount type=bind,source="/path/to/your/data",target=/work \
   nist-tools:latest \
-  lib2nist_convert.sh /work/input.msp /work/output_library
+  python3 /usr/local/bin/libconverter.py --input /work/input.msp --outlib /work/output_library
 ```
 
-Output files are written back to the mounted host directory:
+Output is written to a subdirectory named after the library:
 
 ```
 /path/to/your/data/
-  output_library.lib
-  output_library.idx
-  output_library.num
+  output_library/
+    PEAK.DBU
+    PEAK.INU
+    REGISTRY.INU
+    USER.DBU
+    ...
   output_library.log
 ```
 
-### SDF example (HMDB)
+### MSP example (HMDB)
 
 ```bash
 docker run --rm \
-  -v "C:/Users/jaileru/Projects/nph-processing-pipeline/data/HMDB:/work" \
+  --mount type=bind,source="${PWD}/spectral_libraries/HMDB/QUERY",target=/work \
   nist-tools:latest \
-  lib2nist_convert.sh /work/structures.sdf /work/HMDBLIB
+  python3 /usr/local/bin/libconverter.py --input /work/msms_spectrum.msp --outlib /work/hmdb
 ```
 
-### MSP example
+### SDF example
 
 ```bash
 docker run --rm \
-  -v "C:/Users/jaileru/Projects/nph-processing-pipeline/data/MoNA:/work" \
+  --mount type=bind,source="${PWD}/spectral_libraries/MoNA",target=/work \
   nist-tools:latest \
-  lib2nist_convert.sh /work/MoNA-export.msp /work/MoNA
+  python3 /usr/local/bin/libconverter.py --input /work/MoNA-export.sdf --outlib /work/mona
+```
+
+### Interactive session
+
+```bash
+docker run --rm -it \
+  --mount type=bind,source="${PWD}/spectral_libraries",target=/work \
+  nist-tools:latest
 ```
 
 ---
 
-## Output options — `convert.ini`
+## Configuration
 
-Output behaviour is controlled by `/opt/lib2nist/convert.ini` inside the image. The `[Directory]` section is generated at runtime by `lib2nist_convert.sh`; only `[Output]` needs to be edited.
+### `convert.ini` — output options
+
+Controls what lib2nist produces. The `[Directory]` section is generated at runtime by `libconverter.py`; only `[Output]` needs editing.
 
 | Option | Value | Description |
 |---|---|---|
@@ -104,27 +120,50 @@ Output behaviour is controlled by `/opt/lib2nist/convert.ini` inside the image. 
 | `MsmsOnly` | `1` | Treat spectra as MS/MS — required for LC-MS/MS metabolomics data |
 | `Msms2008-Compat` | `0` | Use newer format compatible with MSPepSearch64 |
 
-To change a setting, edit `containers/convert.ini` and rebuild the image.
+To change a setting, edit `lib2nist-container/convert.ini` and rebuild the image.
+
+### `wrapper.ini` — executable paths
+
+Tells `libconverter.py` where to find the executables inside the container. Only needs editing if the image layout changes.
+
+```ini
+[LIB2NIST]
+exe          = /opt/lib2nist/lib2nist64.exe
+ini_template = /opt/lib2nist/convert.ini
+
+[WINE]
+exe           = wine64
+prefix_script = /usr/local/bin/run_with_wine_prefix.sh
+```
 
 ---
 
 ## Running MSPepSearch64
 
-MSPepSearch64 is on `PATH` and can be called directly. Interactive terminal:
-
-```bash
-docker run --rm -it \
-  -v "/path/to/your/data:/work" \
-  nist-tools:latest
-```
-
-Then inside the container:
+MSPepSearch64 is on `PATH` and can be called directly via the Wine helper:
 
 ```bash
 run_with_wine_prefix.sh MSPepSearch64.exe /h
 ```
 
 `run_with_wine_prefix.sh` must wrap any Wine executable call. It copies the read-only Wine prefix to a per-process temp directory before execution, which is required for parallel safety on SLURM.
+
+---
+
+## Registry
+
+The image is published to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/julianaleru/nist-tools:latest
+```
+
+To push a new version after rebuilding:
+
+```bash
+docker tag nist-tools:latest ghcr.io/julianaleru/nist-tools:latest
+docker push ghcr.io/julianaleru/nist-tools:latest
+```
 
 ---
 
@@ -143,13 +182,19 @@ apptainer build /work/users/j/a/jaileru/containers/nist-tools.sif \
     docker-archive:///work/users/j/a/jaileru/containers/nist-tools.tar
 ```
 
+Or pull directly from GHCR:
+
+```bash
+apptainer pull docker://ghcr.io/julianaleru/nist-tools:latest
+```
+
 Running a conversion on Longleaf:
 
 ```bash
 apptainer exec \
   --bind /work/users/j/a/jaileru/data:/work \
   /work/users/j/a/jaileru/containers/nist-tools.sif \
-  lib2nist_convert.sh /work/input.msp /work/output_library
+  python3 /usr/local/bin/libconverter.py --input /work/input.msp --outlib /work/output_library
 ```
 
 SLURM provides a fast node-local `$TMPDIR` that `run_with_wine_prefix.sh` uses automatically for the Wine prefix copy.
