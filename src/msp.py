@@ -1,8 +1,9 @@
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional,Tuple
-
+from typing import Literal, Optional, Tuple, Mapping, Any
+import subprocess
 
 @dataclass
 class Spectrum:
@@ -27,11 +28,11 @@ class MspFile:
     "num peaks": "NumPeaks",
     "comments": "Comments",
     "collision_energy": "CollisionEnergy",
-}
-    def __init__(self, path: Path, ion_mode: Literal["P", "N"]):
-        self.path = Path(path)
+    }
+    def __init__(self, path: Optional[Path | str], ion_mode: Literal["P", "N"], spectra: Optional[list[Spectrum]] = None):
+        self.path = Path(path) if path else None
         self.ion_mode = ion_mode
-        self.spectra: list[Spectrum] = self._read_msp_file(self.path, ion_mode)
+        self.spectra: list[Spectrum] = spectra if spectra is not None else self._read_msp_file(self.path, ion_mode)
 
     def _read_msp_file(self, path: Path, ion_mode: Literal["P", "N"]) -> list[Spectrum]:
         spectra: list[Spectrum] = []
@@ -59,8 +60,8 @@ class MspFile:
                         current["NumPeaks"] = int(val.strip())
                         current.setdefault("peaks", [])
                         reading_peaks = True
-                    elif key_lower in _KEY_MAP:
-                        current[_KEY_MAP[key_lower]] = val.strip()
+                    elif key_lower in self._KEY_MAP:
+                        current[self._KEY_MAP[key_lower]] = val.strip()
 
         if current:
             spectra.append(self._build_spectrum(current, ion_mode))
@@ -73,6 +74,41 @@ class MspFile:
         if current:
             spectra.append(self.build_sepctrum(current,ion_mode))
         pass
+    def chunk(self, n_cores: int = 8) -> list[MspFile]:
+        size = math.ceil(len(self.spectra) / n_cores)
+        return [
+            MspFile(path=None, ion_mode=self.ion_mode, spectra=self.spectra[i : i + size])
+            for i in range(0, len(self.spectra), size)
+        ]
+
+    _MSP_FIELD_NAMES = {
+        "Name": "Name",
+        "Formula": "Formula",
+        "MW": "ExactMass",
+        "PrecursorMz": "PrecursorMZ",
+        "IonMode": "Ion_mode",
+        "NumPeaks": "Num Peaks",
+        "Comments": "Comments",
+        "CollisionEnergy": "Collision_energy",
+    }
+
+    def to_msp(self) -> str:
+        blocks: list[str] = []
+        for s in self.spectra:
+            lines: list[str] = []
+            for attr, msp_key in self._MSP_FIELD_NAMES.items():
+                val = getattr(s, attr)
+                if val is None:
+                    continue
+                if attr == "NumPeaks":
+                    lines.append(f"{msp_key}: {len(s.Peaks)}")
+                    for mz, intensity in s.Peaks:
+                        lines.append(f"{mz} {intensity}")
+                else:
+                    lines.append(f"{msp_key}: {val}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks) + "\n"
+
 
     def _build_spectrum(self, raw: dict, ion_mode: Literal["P", "N"]) -> Spectrum:
         return Spectrum(
@@ -93,76 +129,13 @@ class MspFile:
     def __iter__(self):
         return iter(self.spectra)
 
-@dataclass
-class Option:
-    flag: Optional[str] = None
-    choices: Optional[Mapping[Any,Any]] = None
-    takes_value: bool  = True
-
-class MSPepSearch:
-    _OPTIONS = {
-        "resolution": Option(
-            "",value_map={"high": "HiRes",
-                          "low":"LoRes"}
-        ),
-        "scoring_type": Option(
-            "",
-            value_map={
-                "peptide": "p",
-                "generic": "g",
-                "dot": "d",
-            }
-        ),
-        "precursor_filtering": Option(
-            "/Z",
-            value_map={
-                "match_with_tol": "match_with_tol",
-                "ignore": "u",
-                "hybrid": "y",
-            }
-        ),
-        "precursor_algorithm": Option(
-            "",
-            value_map={
-                "Standard":"d",
-                "Fast":"f",
-                "PrecursorTol": "m",
-                "RetentionTimeTol":"d",
-                "All":"s",
-
-            }
-        )
-    }
-    def __init__(self,
-                 query: MspFile,
-                 library: SpectralLibrary,
-                 resolution:Literal['high','low'],
-                 scoring_type:Literal['peptide','generic','dot'],
-                 precursor_filtering: Literal['match_with_tol','ignore','hybrid'],
-                 presearch_algorithm: Literal['Standard','Fast','PrecursorTol','RetentionTimeTol','All'],
-                 max_hits: Optional[int|None] = 100,
-                 min_match_factor: Optional[int] = 500
-                 ):
-        self.resolution = resolution
-        self.scoring_type = scoring_type
-        self.precursor_filtering = precursor_filtering
-        self.presearch_algorithm = presearch_algorithm
-        self.max_hits = max_hits
-        self.min_match_factor = min_match_factor
-        self.library = library
-    def _write_executable(self):
-        pass
-
-
-
-
 
 @dataclass
 class SpectralLibrary:
-    library_name: str = ""
+    library_name: str 
+    runtime: Literal['docker','apptainer'] = 'docker'
+    image: str = "/spectral-annotation/lib2nist-container/apptainer-files/nist-tools-latest.sif"
     files: list[MspFile] = field(default_factory=list)
-    presearch_algorithm: str = "RetentionTimeTol"
-    retention_time_tolerance: Optional[Tuple[float,float]]
     @property
     def positive(self) -> Optional[MspFile]:
         return next((f for f in self.files if f.ion_mode == "P"), None)
@@ -176,4 +149,29 @@ class SpectralLibrary:
 
     def __iter__(self):
         return iter(self.files)
+    def _build_container_cmd(self, input_path: str, output_lib: str) -> list[str]:
+        output_dir = str(Path(output_lib).parent)
+        input_bind = f"{input_path}:/work/input.msp"
+        output_bind = f"{output_dir}:/work/output"
+        container_outlib = "/work/output/" + Path(output_lib).name
+
+        if self.runtime == "docker":
+            return ["docker", "run", "--rm",
+                    "-v", input_bind, "-v", output_bind,
+                    self.image, "python3", "/usr/local/bin/libconverter.py",
+                    "--input", "/work/input.msp", "--outlib", container_outlib]
+        else:
+            print("Please Load Apptainer Module")
+            return ["apptainer", "exec",
+                    "--bind", input_bind, "--bind", output_bind,
+                    self.image, "python3", "/usr/local/bin/libconverter.py",
+                    "--input", "/work/input.msp", "--outlib", container_outlib]
+    def build_nist_library(self,ion_mode:Literal["P","N"],output_lib:str):
+        for msp_file in self.files:
+            if msp_file.ion_mode == ion_mode:
+                cmd = self._build_container_cmd(str(msp_file.path),output_lib)
+                subprocess.run(cmd,check=True)
+            else:
+                continue
+
 
