@@ -29,7 +29,8 @@ RUN apt-get update && \
         unzip \
         rsync \
         ca-certificates \
-        procps && \
+        procps \
+        python3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Stage NIST binary
@@ -54,6 +55,9 @@ ENV PATH=/opt/mspepsearch:$PATH
 
 COPY mspepsearch-container/binaries/run_with_wine_prefix.sh /usr/local/bin/run_with_wine_prefix.sh
 RUN chmod +x /usr/local/bin/run_with_wine_prefix.sh
+
+COPY src/mspepsearch_runner.py /usr/local/bin/mspepsearch_runner.py
+RUN chmod +x /usr/local/bin/mspepsearch_runner.py
 
 WORKDIR /work
 CMD ["/bin/bash"]
