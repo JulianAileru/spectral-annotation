@@ -7,70 +7,32 @@ from typing import Any, Mapping, Optional, Literal
 import subprocess
 import logging
 
+from dataclasses import dataclass
+from typing import ClassVar, Literal
+from enum import Enum
 
-@dataclass
-class Option:
-    flag: str
-    value_map: dict
-    default_val: str
-    choices: Optional[Mapping[Any, Any]] = None
+
+class SearchAlgorithm(Enum):
+    IDENTITY_MSMS          = ("azlGmi", True)
+    IDENTITY_HIRES         = ("aulGd", True)
+    SIMILARITY_MSMS_HYBRID = ("aylGd", True)
+    SIMILARITY_MSMS_EI     = ("Md", False)
+
+    def __init__(self, flags: str, hires: bool):
+        self.flags = flags
+        self.hires = hires
+
+
 
 
 class MSPepSearch:
-    _HIRES_TYPES = {"peptide", "generic", "dot"}
-
-    _OPTIONS = {
-        "scoring_type": Option(
-            flag="",
-            value_map={
-                # HiRes
-                "peptide": "P",
-                "generic": "G",
-                "dot": "D",
-                # LoRes
-                "identity": "I",
-                "quick_identity": "Q",
-                "simple_similarity": "S",
-                "hybrid": "H",
-                "neutral_loss": "L",
-                "msms_ei": "M",
-            },
-            default_val="generic",
-        ),
-        "precursor_filtering": Option(
-            flag="",
-            value_map={
-                "match_with_tol": "z",
-                "ignore": "u",
-                "hybrid": "y",
-            },
-            default_val="match_with_tol",
-        ),
-        "presearch_algorithm": Option(
-            flag="",
-            value_map={
-                "Standard": "d",
-                "Fast": "f",
-                "PrecursorTol": "m",
-                "All": "s",
-            },
-            default_val="Standard",
-        ),
-    }
-
     def __init__(
         self,
         query: MspFile,
         library: SpectralLibrary,
+        algorithm: SearchAlgorithm,
         lib_paths: list[str],
         runtime: Literal["docker", "apptainer"] = "docker",
-        scoring_type: Literal[
-            "peptide", "generic", "dot",
-            "identity", "quick_identity", "simple_similarity",
-            "hybrid", "neutral_loss", "msms_ei"
-        ] = "generic",
-        precursor_filtering: Literal["match_with_tol", "ignore", "hybrid"] = "match_with_tol",
-        presearch_algorithm: Literal["Standard", "Fast", "PrecursorTol", "All"] = "Standard",
         verbose: bool = True,
         return_best_hits_only: bool = False,
         precursor_mz_tol: float = 1.6,
@@ -81,11 +43,9 @@ class MSPepSearch:
     ):
         self.query = query
         self.library = library
+        self.algorithm = algorithm
         self.lib_paths = lib_paths
         self.runtime = runtime
-        self.scoring_type = scoring_type
-        self.precursor_filtering = precursor_filtering
-        self.presearch_algorithm = presearch_algorithm
         self.verbose = verbose
         self.return_best_hits_only = return_best_hits_only
         self.precursor_mz_tol = precursor_mz_tol
@@ -94,43 +54,39 @@ class MSPepSearch:
         self.min_match_factor = min_match_factor
         self.image = image
 
-    @property
-    def is_hires(self) -> bool:
-        return self.scoring_type in self._HIRES_TYPES
 
     def _build_positional_flags(self) -> str:
-        opts = self._OPTIONS
-        presearch = opts["presearch_algorithm"].value_map[self.presearch_algorithm]
-        scoring = opts["scoring_type"].value_map[self.scoring_type]
-
-        flags = presearch
-        if self.is_hires:
-            flags += opts["precursor_filtering"].value_map[self.precursor_filtering]
-        flags += scoring
-        return flags
+        return self.algorithm.flags
 
     def _build_cmd(self, input_path: str, lib_paths: list[str], output_path: str, lib_in_mem: bool = True) -> list[str]:
         cmd = ["MSPepSearch64.exe", self._build_positional_flags()]
-
-        # --- Presearch options ---
         cmd += ["/INP", input_path]
         for lib in lib_paths:
             cmd += ["/LIB", lib]
         if lib_in_mem:
             cmd += ["/LibInMem"]
 
-        # --- HiRes / LoRes search options ---
-        if self.is_hires:
-            cmd += ["/Z", str(self.precursor_mz_tol)]
+        if self.algorithm.name == "IDENTITY_MSMS":
+            cmd += ["/ZPPM", str(self.precursor_mz_tol)]
+            cmd += ["/ZI",1.6]
             cmd += ["/M", str(self.fragment_mz_tol)]
-        cmd += ["/MatchPolarity"]
-        cmd += ["/MatchCharge"]
-
-        # --- Output options ---
+        elif self.algorithm.name == "IDENTITY_HIRES":
+            cmd += ["/M",str(self.fragment_mz_tol)]
+        elif self.algorithm.name == "SIMILARITY_MSMS_HYBRID":
+            cmd += ['/ZPPM',str(self.precursor_mz_tol)]
+            cmd += ["/M",str(self.fragment_mz_tol)]
+        elif self.algorithm.name == 'SIMILARITY_MSMS_EI':
+            pass 
+        else:
+            raise ValueError("Algorithm Not Found")
+        
+        
+        cmd += ["/MatchPolarity", "/MatchCharge"]
         cmd += ["/OUTTAB", output_path]
         cmd += ["/HITS", str(self.max_hits)]
+        cmd += ["/All"]
         cmd += ["/MinMF", str(self.min_match_factor)]
-        cmd += ["/OutPrecursorType",
+        cmd += ["/OutPrecursorType", 
                 "/OutMW",
                 "/OutChemForm",
                 "/OutIK",
