@@ -1,0 +1,8 @@
+> MSPepSearch ver. 0.91 build Jun  3 2013 19:11:46. Command line:
+> "C:\Users\jaileru\Downloads\2013_11_14_MSPepSearch_x64\2013_06_04_MSPepSearch_x64\MSPepSearch.exe" /INP "C:\Users\jaileru\Projects\spectral-annotation\spectral_libraries\HMDB\QUERY\msms_spectrum.msp" /OUTTAB "C:\Users\jaileru\Projects\spectral-annotation\spectral_libraries\HMDB\QUERY\msms_spectrum.msp.tsv" /LIB "C:\Users\jaileru\Projects\spectral-annotation\spectral_libraries\HMDB\NIST-MS-Positive\hmdb_experimental_P" d v i h /Z 1.6 /M 0.8 /MinMF 450 /HITS 10 /MzLimits 0 2000 /MinInt 1 /ALL /OutPrecursorMZ /OutDeltaPrecursorMZ /OutSpecNum /HiPri /LibInMem   /PWND 260ABE
+>
+Num	Unknown	Precursor m/z	Rank	Library	Id	Mass	Delta(m/z)	Lib Precursor m/z	Score	Dot Product	Prob(%)	Rev-Dot	Peptide	Charge	FlankRes	Mods	Pep	Nreps	Tfratio	Protein
+1	Unknown	267.19
+2	Unknown	267.19
+>
+> Completed. 2 spectra in 0.002 sec, process time = 0.004 sec (read 0.000s print 0.000s init pio 0.000s aux 0.000s sp 0.000s, search only: 0.001s+0.000s=0.002s, 1288.99 spec/s) 1011.99 spec/s Compared 0 spec, No spectra compared 2, peaks/spec 6.00

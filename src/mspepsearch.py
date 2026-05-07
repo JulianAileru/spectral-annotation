@@ -10,53 +10,47 @@ import logging
 
 @dataclass
 class Option:
-    flag: str
     value_map: dict
     default_val: str
+    flag: str = ""
     choices: Optional[Mapping[Any, Any]] = None
 
 
-class MSPepSearch:
-    _HIRES_TYPES = {"peptide", "generic", "dot"}
 
-    _OPTIONS = {
-        "scoring_type": Option(
-            flag="",
-            value_map={
-                # HiRes
-                "peptide": "P",
-                "generic": "G",
-                "dot": "D",
-                # LoRes
-                "identity": "I",
-                "quick_identity": "Q",
-                "simple_similarity": "S",
-                "hybrid": "H",
-                "neutral_loss": "L",
-                "msms_ei": "M",
-            },
-            default_val="generic",
-        ),
-        "precursor_filtering": Option(
-            flag="",
-            value_map={
-                "match_with_tol": "z",
-                "ignore": "u",
-                "hybrid": "y",
-            },
-            default_val="match_with_tol",
-        ),
-        "presearch_algorithm": Option(
-            flag="",
-            value_map={
-                "Standard": "d",
-                "Fast": "f",
-                "PrecursorTol": "m",
-                "All": "s",
-            },
-            default_val="Standard",
-        ),
-    }
+class MSPepSearch: 
+    _OPTIONS = {"HiResSearch Options":Option(value_map={"generic":"G",
+                                                        "peptide":"P",
+                                                        "dot":"D"},
+                                                        default_val="generic"),
+                "LowResSearch Options":Option(value_map={"Identity": "I",
+                                                         "SimpleSimilarity":"S",
+                                                         "HybridSimiliarity":"H",
+                                                         "NeutralLossSimilarity":"L",
+                                                         "MsMsEI": "M"
+                                                         },
+                                                         default_val=None),
+                "Presearch Options": Option(value_map={"Standard":"d",
+                                                       "Fast":"f",
+                                                       "PrecursorIonTol":"m",
+                                                       "Sequential":"s"},
+                                                       default_val='PrecursorIonTol'),
+                "AdditionalHiResSearch Options":Option(value_map={"RejectHits":"j",
+                                                                  "AlternativePeakMatching":"a",
+                                                                  "IgnorePeakbyZI":"i",
+                                                                  },default_val='AlternativePeakMatching'),
+                "PrecursorMode Options":Option(value_map={"MsMs":"z",
+                                                          "NoMatch":"u",
+                                                          "Hybrid":"y"},
+                                                          default_val="MsMs"),
+                "SearchThreshold Options":Option(value_map={"Low":"l",
+                                                            "Medium":"e",
+                                                            "High":"h"},
+                                                            default_val="Low"),
+                "SearchParameters":Option(value_map={"ReverseSearch":"r[2]",
+                                                     "PenalizeRareCompounds":"p",
+                                                     "NoHitProbOut":"h"},
+                                                     default_val=None)
+                }
 
     def __init__(
         self,
@@ -64,17 +58,19 @@ class MSPepSearch:
         library: SpectralLibrary,
         lib_paths: list[str],
         runtime: Literal["docker", "apptainer"] = "docker",
+        resolution: Literal["HiRes","LoRes"] = "HiRes",
         scoring_type: Literal[
-            "peptide", "generic", "dot",
-            "identity", "quick_identity", "simple_similarity",
-            "hybrid", "neutral_loss", "msms_ei"
+            "generic", "peptide", "dot",
+            "Identity", "SimpleSimilarity", "HybridSimiliarity",
+            "NeutralLossSimilarity", "MsMsEI"
         ] = "generic",
-        precursor_filtering: Literal["match_with_tol", "ignore", "hybrid"] = "match_with_tol",
-        presearch_algorithm: Literal["Standard", "Fast", "PrecursorTol", "All"] = "Standard",
+        presearch_algorithm: Literal["Standard", "Fast", "PrecursorIonTol", "Sequential"] = "PrecursorIonTol",
+        precursor_mode: Literal["MsMs", "NoMatch", "Hybrid"] = "MsMs",
+        search_threshold: Literal["Low", "Medium", "High"] = "Low",
         verbose: bool = True,
         return_best_hits_only: bool = False,
-        precursor_mz_tol: float = 1.6,
-        fragment_mz_tol: float = 0.6,
+        precursor_mz_tol: float = 20,
+        peak_mz_tol: float = 0.01,
         max_hits: int = 100,
         min_match_factor: int = 500,
         image: str = "ghcr.io/julianaileru/spectral-annotation/mspepsearch:latest",
@@ -83,31 +79,37 @@ class MSPepSearch:
         self.library = library
         self.lib_paths = lib_paths
         self.runtime = runtime
+        self.resolution = resolution
         self.scoring_type = scoring_type
-        self.precursor_filtering = precursor_filtering
         self.presearch_algorithm = presearch_algorithm
+        self.precursor_mode = precursor_mode
+        self.search_threshold = search_threshold
         self.verbose = verbose
         self.return_best_hits_only = return_best_hits_only
         self.precursor_mz_tol = precursor_mz_tol
-        self.fragment_mz_tol = fragment_mz_tol
+        self.peak_mz_tol = peak_mz_tol
         self.max_hits = max_hits
         self.min_match_factor = min_match_factor
         self.image = image
 
     @property
     def is_hires(self) -> bool:
-        return self.scoring_type in self._HIRES_TYPES
+        return self.resolution == "HiRes"
 
     def _build_positional_flags(self) -> str:
         opts = self._OPTIONS
-        presearch = opts["presearch_algorithm"].value_map[self.presearch_algorithm]
-        scoring = opts["scoring_type"].value_map[self.scoring_type]
+        presearch = opts["Presearch Options"].value_map[self.presearch_algorithm]
 
-        flags = presearch
         if self.is_hires:
-            flags += opts["precursor_filtering"].value_map[self.precursor_filtering]
-        flags += scoring
-        return flags
+            additional = (opts["AdditionalHiResSearch Options"].value_map["AlternativePeakMatching"]
+                          + opts["AdditionalHiResSearch Options"].value_map["IgnorePeakbyZI"])
+            precursor_mode = opts["PrecursorMode Options"].value_map[self.precursor_mode]
+            threshold = opts["SearchThreshold Options"].value_map[self.search_threshold]
+            scoring = opts["HiResSearch Options"].value_map[self.scoring_type]
+            return presearch + additional + precursor_mode + threshold + scoring
+        else:
+            scoring = opts["LowResSearch Options"].value_map[self.scoring_type]
+            return presearch + scoring
 
     def _build_cmd(self, input_path: str, lib_paths: list[str], output_path: str, lib_in_mem: bool = True) -> list[str]:
         cmd = ["MSPepSearch64.exe", self._build_positional_flags()]
@@ -121,8 +123,9 @@ class MSPepSearch:
 
         # --- HiRes / LoRes search options ---
         if self.is_hires:
-            cmd += ["/Z", str(self.precursor_mz_tol)]
-            cmd += ["/M", str(self.fragment_mz_tol)]
+            cmd += ["/ZPPM", str(self.precursor_mz_tol)]
+            cmd += ['/ZI',str(1.6)]
+            cmd += ["/M", str(self.peak_mz_tol)]
         cmd += ["/MatchPolarity"]
         cmd += ["/MatchCharge"]
 
@@ -131,7 +134,11 @@ class MSPepSearch:
         cmd += ["/HITS", str(self.max_hits)]
         cmd += ["/MinMF", str(self.min_match_factor)]
         cmd += ["/OutPrecursorType",
+                "/OutPrecursorMZ",
+                "/OutDeltaPrecursorMZ",
                 "/OutMW",
+                "/OutCAS",
+                "/All",
                 "/OutChemForm",
                 "/OutIK",
                 "/OutDeltaMW",
@@ -142,8 +149,8 @@ class MSPepSearch:
         return cmd
 
     def _build_container_cmd(self, output_path: str) -> list[str]:
-        input_path = str(self.query.path)
-        output_dir = str(Path(output_path).parent)
+        input_path = Path(self.query.path).as_posix()
+        output_dir = Path(output_path).parent.as_posix()
 
         input_bind = f"{input_path}:/work/input.msp"
         output_bind = f"{output_dir}:/work/output"
@@ -153,7 +160,7 @@ class MSPepSearch:
         lib_binds = []
         for i, lib in enumerate(self.lib_paths):
             container_lib = f"/work/lib{i}"
-            lib_binds.append(f"{lib}:{container_lib}")
+            lib_binds.append(f"{Path(lib).as_posix()}:{container_lib}")
             container_lib_paths.append(container_lib)
 
         mspepsearch_cmd = self._build_cmd("/work/input.msp", container_lib_paths, container_output)
@@ -163,8 +170,6 @@ class MSPepSearch:
             for bind in lib_binds:
                 container_cmd += ["-v", bind]
         else:
-            if self.runtime == "apptainer":
-                print("Please Load Apptainer Module")
             container_cmd = ["apptainer", "exec", "--bind", input_bind, "--bind", output_bind]
             for bind in lib_binds:
                 container_cmd += ["--bind", bind]
