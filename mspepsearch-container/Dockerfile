@@ -29,7 +29,8 @@ RUN apt-get update && \
         unzip \
         rsync \
         ca-certificates \
-        procps && \
+        procps \
+        python3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Stage NIST binary
