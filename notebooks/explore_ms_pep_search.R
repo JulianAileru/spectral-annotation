@@ -8,6 +8,11 @@ neglib = "spectral_libraries/HMDB/NIST-MS-Negative/hmdb_experimental_N"
 query = "spectral_libraries/HMDB/QUERY/msms_spectrum.msp"
 query = mssearchr::ReadMsp(query)
 
-hitlist <- IdentitySearchMsMs(query,libraries = c(poslib,neglib))
+IdMsMs <- IdentitySearchMsMs(query,libraries = poslib) #azlGmi
+IdHiRes <- IdentitySearchHighRes(query,libraries = poslib) #aulGd
+SimMsMsH <- SimilaritySearchMsmsHybrid(query,libraries = poslib) # aylGd
+SimSearchMsMs <- SimilaritySearchMsMsInEi(query,libraries = poslib) #Md
+
+
 
                               

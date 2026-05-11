@@ -18,10 +18,10 @@ set -euo pipefail
 WORK_TMPDIR="${TMPDIR:-/tmp}"
 PREFIX_DIR=$(mktemp -d "${WORK_TMPDIR}/wine_XXXXXX")
 cleanup() {
-    # Wait for wineserver to flush its registry to disk before deleting the prefix.
-    # Without this, the daemon's post-exit registry save races the trap and produces
-    # "could not save registry branch to system.reg : No such file or directory".
-    WINEPREFIX="$PREFIX_DIR" wineserver -w 2>/dev/null || true
+    # Kill wineserver immediately rather than waiting (-w) for it to flush. The
+    # prefix is deleted right after, so a graceful registry save is irrelevant.
+    # Using -w here would block the container exit because wineserver lingers.
+    WINEPREFIX="$PREFIX_DIR" wineserver -k 2>/dev/null || true
     rm -rf "$PREFIX_DIR"
 }
 trap cleanup EXIT
@@ -53,7 +53,11 @@ fi
 if [[ -z "${DISPLAY:-}" ]] && command -v xvfb-run &>/dev/null; then
     xvfb-run --auto-servernum "$@" \
         2> >(grep -Ev "^X connection to|^wineserver: could not save registry" >&2)
-    exit $?
+    RC=$?
+    # Kill wineserver before exiting so it releases its fd on the process
+    # substitution pipe above — otherwise grep never sees EOF and the shell hangs.
+    WINEPREFIX="$PREFIX_DIR" wineserver -k 2>/dev/null || true
+    exit $RC
 fi
 
-exec "$@"
+"$@"
