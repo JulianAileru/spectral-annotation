@@ -17,6 +17,7 @@ DEFAULT_CONFIG = '/opt/lib2nist/wrapper.ini'
 
 
 def load_config(path=DEFAULT_CONFIG):
+    """Load and return the lib2nist wrapper configuration from an INI file."""
     config = configparser.ConfigParser()
     if not config.read(path):
         raise FileNotFoundError(f"Config not found: {path}")
@@ -24,10 +25,24 @@ def load_config(path=DEFAULT_CONFIG):
 
 
 def to_wine_path(linux_path):
+    """Convert an absolute Linux path to Wine's Z: drive format (``Z:\\path\\to\\file``)."""
     return 'Z:' + linux_path.replace('/', '\\')
 
 
 def convert(input_path, output_lib, log_file=None, config=None):
+    """
+    Convert an MSP or SDF spectral file to a NIST library via lib2nist.exe under Wine.
+
+    The input is staged into a temp directory named after the library so that lib2nist
+    names its output subdirectory after ``lib_name`` rather than the original filename.
+
+    Args:
+        input_path: Path to the ``.msp`` or ``.sdf`` input file.
+        output_lib: Destination library path without extension; lib2nist creates a
+            subdirectory with this basename inside the parent directory.
+        log_file: Path for the lib2nist log (defaults to ``<output_lib>.log``).
+        config: Parsed configparser object; loaded from ``DEFAULT_CONFIG`` if not provided.
+    """
     if config is None:
         config = load_config()
 
@@ -99,6 +114,7 @@ def convert(input_path, output_lib, log_file=None, config=None):
 
 
 def main():
+    """CLI entry point: parse arguments and call ``convert()``."""
     parser = argparse.ArgumentParser(description='Python interface for lib2nist')
     parser.add_argument('--input',  '-in',     required=True, help='Input file (.msp or .sdf)')
     parser.add_argument('--outlib', '-outlib',  required=True, help='Output library path (no extension)')
