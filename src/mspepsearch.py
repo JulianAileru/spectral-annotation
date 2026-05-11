@@ -1,76 +1,35 @@
 from dataclasses import dataclass
 from pathlib import Path
-import sys,os
+import sys, os, tempfile, concurrent.futures
 sys.path.append(os.path.abspath(r"C:\Users\jaileru\Projects\spectral-annotation"))
 from src.msp import MspFile, SpectralLibrary
-from typing import Any, Mapping, Optional, Literal
+from typing import Optional, Literal
 import subprocess
-import logging
+from enum import Enum
+from tqdm import tqdm
 
 
-@dataclass
-class Option:
-    flag: str
-    value_map: dict
-    default_val: str
-    choices: Optional[Mapping[Any, Any]] = None
+class SearchAlgorithm(Enum):
+    IDENTITY_MSMS          = ("azlGmi", True)
+    IDENTITY_HIRES         = ("aulGd", True)
+    SIMILARITY_MSMS_HYBRID = ("aylGd", True)
+    SIMILARITY_MSMS_EI     = ("Md", False)
+
+    def __init__(self, flags: str, hires: bool):
+        self.flags = flags
+        self.hires = hires
+
+
 
 
 class MSPepSearch:
-    _HIRES_TYPES = {"peptide", "generic", "dot"}
-
-    _OPTIONS = {
-        "scoring_type": Option(
-            flag="",
-            value_map={
-                # HiRes
-                "peptide": "P",
-                "generic": "G",
-                "dot": "D",
-                # LoRes
-                "identity": "I",
-                "quick_identity": "Q",
-                "simple_similarity": "S",
-                "hybrid": "H",
-                "neutral_loss": "L",
-                "msms_ei": "M",
-            },
-            default_val="generic",
-        ),
-        "precursor_filtering": Option(
-            flag="",
-            value_map={
-                "match_with_tol": "z",
-                "ignore": "u",
-                "hybrid": "y",
-            },
-            default_val="match_with_tol",
-        ),
-        "presearch_algorithm": Option(
-            flag="",
-            value_map={
-                "Standard": "d",
-                "Fast": "f",
-                "PrecursorTol": "m",
-                "All": "s",
-            },
-            default_val="Standard",
-        ),
-    }
-
     def __init__(
         self,
         query: MspFile,
         library: SpectralLibrary,
+        algorithm: SearchAlgorithm,
         lib_paths: list[str],
         runtime: Literal["docker", "apptainer"] = "docker",
-        scoring_type: Literal[
-            "peptide", "generic", "dot",
-            "identity", "quick_identity", "simple_similarity",
-            "hybrid", "neutral_loss", "msms_ei"
-        ] = "generic",
-        precursor_filtering: Literal["match_with_tol", "ignore", "hybrid"] = "match_with_tol",
-        presearch_algorithm: Literal["Standard", "Fast", "PrecursorTol", "All"] = "Standard",
         verbose: bool = True,
         return_best_hits_only: bool = False,
         precursor_mz_tol: float = 1.6,
@@ -81,11 +40,9 @@ class MSPepSearch:
     ):
         self.query = query
         self.library = library
+        self.algorithm = algorithm
         self.lib_paths = lib_paths
         self.runtime = runtime
-        self.scoring_type = scoring_type
-        self.precursor_filtering = precursor_filtering
-        self.presearch_algorithm = presearch_algorithm
         self.verbose = verbose
         self.return_best_hits_only = return_best_hits_only
         self.precursor_mz_tol = precursor_mz_tol
@@ -94,34 +51,70 @@ class MSPepSearch:
         self.min_match_factor = min_match_factor
         self.image = image
 
-    @property
-    def is_hires(self) -> bool:
-        return self.scoring_type in self._HIRES_TYPES
 
     def _build_positional_flags(self) -> str:
-        opts = self._OPTIONS
-        presearch = opts["presearch_algorithm"].value_map[self.presearch_algorithm]
-        scoring = opts["scoring_type"].value_map[self.scoring_type]
+        return self.algorithm.flags
 
-        flags = presearch
-        if self.is_hires:
-            flags += opts["precursor_filtering"].value_map[self.precursor_filtering]
-        flags += scoring
-        return flags
+    def _build_cmd(self, input_path: str, lib_paths: list[str], output_path: str, lib_in_mem: bool = True) -> list[str]:
+        cmd = ["run_with_wine_prefix.sh", "wine64", "/opt/mspepsearch/MSPepSearch64.exe", self._build_positional_flags()]
+        cmd += ["/INP", input_path]
+        for lib in lib_paths:
+            cmd += ["/LIB", lib]
+        if lib_in_mem:
+            cmd += ["/LibInMem"]
+
+        if self.algorithm.name == "IDENTITY_MSMS":
+            cmd += ["/ZPPM", str(self.precursor_mz_tol)]
+            cmd += ["/ZI","1.6"]
+            cmd += ["/M", str(self.fragment_mz_tol)]
+        elif self.algorithm.name == "IDENTITY_HIRES":
+            cmd += ["/M",str(self.fragment_mz_tol)]
+        elif self.algorithm.name == "SIMILARITY_MSMS_HYBRID":
+            cmd += ['/ZPPM',str(self.precursor_mz_tol)]
+            cmd += ["/M",str(self.fragment_mz_tol)]
+        elif self.algorithm.name == 'SIMILARITY_MSMS_EI':
+            pass 
+        else:
+            raise ValueError("Algorithm Not Found")
+        
+        
+        cmd += ["/MatchPolarity", "/MatchCharge"]
+        cmd += ["/OUTTAB", output_path]
+        cmd += ["/HITS", str(self.max_hits)]
+        cmd += ["/All"]
+        cmd += ["/MinMF", str(self.min_match_factor)]
+        cmd += ["/OutPrecursorType", 
+                "/OutMW",
+                "/OutChemForm",
+                "/OutIK",
+                "/OutDeltaMW",
+                "/OutNumMP"]
+        if self.return_best_hits_only:
+            cmd += ["/OutBestHitsOnly"]
+
+        return cmd
+
+    @staticmethod
+    def _to_docker_path(path: str) -> str:
+        p = Path(path).resolve()
+        if sys.platform == "win32":
+            drive, rest = os.path.splitdrive(str(p))
+            return "/" + drive[0].lower() + rest.replace("\\", "/")
+        return str(p)
 
     def _build_container_cmd(self, output_path: str) -> list[str]:
-        input_path = Path(self.query.path).resolve().as_posix()
-        output_dir = Path(output_path).resolve().parent.as_posix()
+        input_path = self._to_docker_path(str(self.query.path))
+        output_dir = self._to_docker_path(str(Path(output_path).resolve().parent))
 
         input_bind = f"{input_path}:/work/input.msp"
         output_bind = f"{output_dir}:/work/output"
-        container_output = "/work/output/" + Path(output_path).name
+        container_output = "/work/output/" + Path(output_path).resolve().name
 
         container_lib_paths = []
         lib_binds = []
         for i, lib in enumerate(self.lib_paths):
             container_lib = f"/work/lib{i}"
-            lib_binds.append(f"{Path(lib).resolve().as_posix()}:{container_lib}")
+            lib_binds.append(f"{self._to_docker_path(lib)}:{container_lib}")
             container_lib_paths.append(container_lib)
 
         runner_cmd = [
@@ -157,8 +150,63 @@ class MSPepSearch:
 
         return container_cmd + [self.image] + runner_cmd
 
-    def run(self, output_path: str) -> None:
+    def run(self, output_path: str, n_cores: int = 1) -> None:
+        if n_cores == 1:
+            self._run_single(output_path)
+            return
+
+        chunks = self.query.chunk(n_cores)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            chunk_inputs = []
+            for i, chunk in enumerate(chunks):
+                p = tmpdir_path / f"chunk_{i}.msp"
+                p.write_text(chunk.to_msp())
+                chunk_inputs.append(p)
+
+            chunk_outputs = [tmpdir_path / f"OUTLIB_{i}" for i in range(len(chunks))]
+
+            def _run_chunk(i: int) -> None:
+                worker = MSPepSearch(
+                    query=MspFile(path=chunk_inputs[i], ion_mode=self.query.ion_mode),
+                    library=self.library,
+                    algorithm=self.algorithm,
+                    lib_paths=self.lib_paths,
+                    runtime=self.runtime,
+                    verbose=self.verbose,
+                    return_best_hits_only=self.return_best_hits_only,
+                    precursor_mz_tol=self.precursor_mz_tol,
+                    fragment_mz_tol=self.fragment_mz_tol,
+                    max_hits=self.max_hits,
+                    min_match_factor=self.min_match_factor,
+                    image=self.image,
+                )
+                worker._run_single(str(chunk_outputs[i]))
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+                futures = [executor.submit(_run_chunk, i) for i in range(len(chunks))]
+                with tqdm(total=len(chunks), desc="searching", unit="chunk") as pbar:
+                    for f in concurrent.futures.as_completed(futures):
+                        f.result()
+                        pbar.update(1)
+
+            self._concat_outlib(chunk_outputs, Path(output_path))
+
+    def _run_single(self, output_path: str) -> None:
         cmd = self._build_container_cmd(output_path)
-        if self.verbose:
-            print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True, stdout=None, stderr=None)
+        env = os.environ.copy()
+        env["MSYS_NO_PATHCONV"] = "1"
+        subprocess.run(cmd, check=True, env=env)
+
+    @staticmethod
+    def _concat_outlib(chunk_outputs: list[Path], output_path: Path) -> None:
+        with open(output_path, "w") as out:
+            for i, chunk_out in enumerate(chunk_outputs):
+                with open(chunk_out) as f:
+                    lines = f.readlines()
+                if i == 0:
+                    out.writelines(lines)
+                else:
+                    data = [l for l in lines if not l.startswith(">")]
+                    out.writelines(data[1:])  # data[0] is the TSV column header
