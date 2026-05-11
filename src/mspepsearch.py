@@ -117,7 +117,25 @@ class MSPepSearch:
             lib_binds.append(f"{self._to_docker_path(lib)}:{container_lib}")
             container_lib_paths.append(container_lib)
 
-        mspepsearch_cmd = self._build_cmd("/work/input.msp", container_lib_paths, container_output)
+        runner_cmd = [
+            "python3", "/usr/local/bin/mspepsearch_runner.py",
+            "--flags", self._build_positional_flags(),
+            "--input", "/work/input.msp",
+            "--output", container_output,
+            "--hits", str(self.max_hits),
+            "--min-mf", str(self.min_match_factor),
+        ]
+        for lib in container_lib_paths:
+            runner_cmd += ["--lib", lib]
+        runner_cmd += ["--lib-in-mem"]
+        if self.is_hires:
+            runner_cmd += ["--precursor-mz-tol", str(self.precursor_mz_tol),
+                           "--fragment-mz-tol", str(self.fragment_mz_tol)]
+        runner_cmd += ["--match-polarity", "--match-charge"]
+        runner_cmd += ["--out-precursor-type", "--out-mw", "--out-chem-form",
+                       "--out-ik", "--out-delta-mw", "--out-num-mp"]
+        if self.return_best_hits_only:
+            runner_cmd += ["--out-best-hits-only"]
 
         if self.runtime == "docker":
             container_cmd = ["docker", "run", "--rm", "-v", input_bind, "-v", output_bind]
@@ -130,7 +148,7 @@ class MSPepSearch:
             for bind in lib_binds:
                 container_cmd += ["--bind", bind]
 
-        return container_cmd + [self.image] + mspepsearch_cmd
+        return container_cmd + [self.image] + runner_cmd
 
     def run(self, output_path: str, n_cores: int = 1) -> None:
         if n_cores == 1:

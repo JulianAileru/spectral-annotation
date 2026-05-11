@@ -1,0 +1,5 @@
+> MSPepSearch ver. 0.9.7.1 build Fri Mar 15 13:11:23 2024. Started 05/06/26 at 19:51:42. Command line:
+> "Z:\opt\mspepsearch\MSPepSearch64.exe" mzG /INP Z:\work\input.msp /LIB Z:\work\lib0 /LibInMem /Z 1.6 /M 0.6 /MatchPolarity /MatchCharge /OUTTAB Z:\work\output\QUERYLIB /HITS 100 /MinMF 500 /OutPrecursorType /OutMW /OutChemForm /OutIK /OutDeltaMW /OutNumMP
+>
+>
+> Completed. 2 spectra in 1.919 sec, process time = 2.180 sec (read 0.003s print 0.000s init pio 0.000s aux 0.000s sp 0.000s, search only: 0.000s+1.915s=1.915s, 1.04426 spec/s) 1.04229 spec/s Compared 820 spec (427.338 spec/s), No spectra compared 0, No hits 0, peaks/spec 6.00
